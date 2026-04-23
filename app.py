@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 # ページ設定（最初に呼ぶ必要がある）
 # ────────────────────────────────────────────────
 st.set_page_config(
-    page_title="🍞 Bakery AI Adviser",
+    page_title="🍞 Bakery AI Adviser for Bakery Demain",
     page_icon="🍞",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -103,7 +103,7 @@ def cached_data_summary() -> dict:
 # ════════════════════════════════════════════════
 # ────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🍞 Bakery AI Adviser")
+    st.markdown("## 🍞 Bakery AI Adviser for Bakery Demain")
 
     # ① 接続ステータス
     st.markdown('<div class="sidebar-section">接続ステータス</div>', unsafe_allow_html=True)
@@ -171,7 +171,7 @@ with st.sidebar:
 # ────────────────────────────────────────────────
 
 # ヘッダー
-st.title("🍞 Bakery AI Adviser")
+st.title("🍞 Bakery AI Adviser for Bakery Demain")
 st.caption("powered by GPT-4o-mini × RAG")
 st.divider()
 
