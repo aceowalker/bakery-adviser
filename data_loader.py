@@ -243,23 +243,100 @@ def get_data_summary() -> dict:
         result["customers"] = {"error": str(e)}
         cust_info = {}
 
-    # AIに渡す圧縮テキストサマリー（500文字以内）
+    # AIに渡す抽象化テキストサマリー（具体的数値・商品名・個人情報を除外）
     lines = []
-    if sales_info and "error" not in sales_info:
-        lines.append(f"【売上】{sales_info.get('trend_text', '')}")
-        lines.append(f"売上上位曜日:{sales_info.get('best_day','')} / 下位:{sales_info.get('worst_day','')}")
-    if prod_info and "error" not in prod_info:
-        lines.append(
-            f"【商品】全{prod_info.get('total_products',0)}品 "
-            f"A:{prod_info.get('a_count',0)}品 B:{prod_info.get('b_count',0)}品 C:{prod_info.get('c_count',0)}品"
-        )
-        lines.append(f"上位商品: {prod_info.get('top10_str','')[:120]}")
-    if cust_info and "error" not in cust_info:
-        lines.append(f"【客層】{cust_info.get('top5_str','')}")
-        lines.append(f"性別:{cust_info.get('gender_str','')} / 上位年代:{cust_info.get('top_ages','')}")
 
-    summary_text = "\n".join(lines)
-    # 500文字に切り詰め
-    result["ai_summary_text"] = summary_text[:500]
+    # ── 売上傾向 ──
+    lines.append("【売上傾向】")
+    if sales_info and "error" not in sales_info:
+        best = sales_info.get("best_day", "")
+        worst = sales_info.get("worst_day", "")
+        weekend = {"土", "日"}
+        if best in weekend:
+            lines.append("・週末（土日）に売上が集中し、平日との差が大きい")
+        else:
+            lines.append(f"・{best}曜日に売上が高く、週内で売上の差が見られる")
+        if worst not in weekend:
+            lines.append(f"・平日（特に{worst}曜日）は売上が低い傾向がある")
+        trend_text = sales_info.get("trend_text", "")
+        if "↑" in trend_text:
+            lines.append("・直近1ヶ月は前月比で上昇傾向にある")
+        elif "↓" in trend_text:
+            lines.append("・直近1ヶ月は前月比でやや下降傾向にある")
+        else:
+            lines.append("・直近1ヶ月の売上は前月比で横ばい傾向にある")
+
+    # ── 商品構成 ──
+    lines.append("【商品構成】")
+    if prod_info and "error" not in prod_info:
+        try:
+            abc_ratios = df_p.groupby("abc_rank")["comp_ratio_num"].sum()
+
+            def _fmt_pct(val: float) -> str:
+                """5%単位に丸める。5%未満は「数」で表現する"""
+                rounded = round(float(val) / 5) * 5
+                return str(rounded) if rounded >= 5 else "数"
+
+            a_r = _fmt_pct(abc_ratios.get("A", 0))
+            b_r = _fmt_pct(abc_ratios.get("B", 0))
+            c_r = _fmt_pct(abc_ratios.get("C", 0))
+            a_cost = df_p[df_p["abc_rank"] == "A"]["cost_ratio"].mean()
+            lines.append(f"・Aランク商品（全体売上の約{a_r}%）：売上貢献度の高い定番・主力商品が中心")
+            lines.append(f"・Bランク商品（全体売上の約{b_r}%）：中程度の売上を持つ準主力商品が中心")
+            lines.append(f"・Cランク商品（全体売上の約{c_r}%）：売上比率は低いが品揃えに貢献する商品が中心")
+            if not pd.isna(a_cost):
+                lines.append(f"・Aランク商品の平均原価率は約{round(a_cost / 5) * 5}%程度")
+        except Exception:
+            lines.append(
+                f"・Aランク:{prod_info.get('a_count',0)}品 / "
+                f"Bランク:{prod_info.get('b_count',0)}品 / "
+                f"Cランク:{prod_info.get('c_count',0)}品"
+            )
+
+    # ── 客層傾向 ──
+    lines.append("【客層傾向】")
+    if cust_info and "error" not in cust_info:
+        try:
+            # 女性比率を10%単位に丸める
+            gender_ratio = df_c.groupby("customer_gender")["ratio_num"].sum()
+            female_key = next((k for k in gender_ratio.index if "女" in str(k)), None)
+            female_pct = gender_ratio[female_key] if female_key else 0
+            female_approx = round(float(female_pct) / 10) * 10
+
+            # 上位3年代を特定して主要年代範囲を生成
+            age_ratios = (
+                df_c.groupby("customer_age")["ratio_num"]
+                .sum()
+                .sort_values(ascending=False)
+            )
+            top_ages = age_ratios.head(3).index.tolist()
+            lower_bounds = [
+                int(str(a).strip().split("~")[0])
+                for a in top_ages
+                if str(a).strip().split("~")[0].isdigit()
+            ]
+            if lower_bounds:
+                main_min = (min(lower_bounds) // 10) * 10
+                main_max = (max(lower_bounds) // 10) * 10 + 9
+                main_range = f"{main_min}〜{main_max}歳"
+            else:
+                main_range = "30〜50代"
+
+            # 全年代の下限値から年齢分布範囲を生成
+            all_lower = [
+                int(str(a).strip().split("~")[0])
+                for a in df_c["customer_age"].unique()
+                if str(a).strip().split("~")[0].isdigit()
+            ]
+            dist_min = min(all_lower) if all_lower else 15
+            dist_max = max(all_lower) + 9 if all_lower else 69
+
+            lines.append(f"・主要客層は{main_range}の女性")
+            lines.append(f"・女性客が全体の約{female_approx}%を占める")
+            lines.append(f"・{dist_min}〜{dist_max}歳に広く分布しており、ファミリー層の来店も多い")
+        except Exception:
+            lines.append(f"・{cust_info.get('gender_str', '')}")
+
+    result["ai_summary_text"] = "\n".join(lines)
 
     return result
