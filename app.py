@@ -52,8 +52,9 @@ st.markdown("""
 # ────────────────────────────────────────────────
 # モジュールのインポート
 # ────────────────────────────────────────────────
+from chapter_indexer import build_chapter_index
 from data_loader import check_files, get_data_summary
-from rag_engine import build_index, retrieve, get_chunk_count
+from rag_engine import build_index, retrieve, get_chunk_count, invalidate_cache
 from advisor_agent import generate_advice, generate_quick_analysis
 
 # ────────────────────────────────────────────────
@@ -131,6 +132,9 @@ with st.sidebar:
         if chunk_count == 0:
             with st.spinner("インデックスを構築中..."):
                 chunk_count = build_index(st.session_state.api_key)
+        # chapter_index.json のキャッシュ生成（初回のみ）
+        with st.spinner("章インデックスを準備中..."):
+            build_chapter_index(st.session_state.api_key)
         st.session_state.rag_ready = True
 
     chunk_count = get_chunk_count()
@@ -139,6 +143,7 @@ with st.sidebar:
     if st.button("🔄 インデックス再構築"):
         with st.spinner("再構築中..."):
             n = build_index(st.session_state.api_key)
+            invalidate_cache()
         st.success(f"再構築完了：{n} チャンク")
         st.rerun()
 
@@ -236,8 +241,8 @@ if user_message:
     # AI回答を生成
     with st.chat_message("assistant"):
         with st.spinner("🍞 アドバイスを生成中..."):
-            # RAGコンテキストを取得
-            rag_context = retrieve(user_message, st.session_state.api_key)
+            # RAGコンテキストを取得（階層ハイブリッド検索）
+            rag_context, search_log = retrieve(user_message, st.session_state.api_key)
 
             # AIアドバイスを生成
             ai_response = generate_advice(
@@ -249,6 +254,19 @@ if user_message:
             )
 
         st.markdown(ai_response)
+
+        # デバッグログ（開発用）
+        with st.expander("🔍 検索ログ（開発用）"):
+            st.markdown("**選択された章**")
+            for label in search_log.get("chapter_labels", []):
+                st.write(f"・{label}")
+            st.markdown("**使用コンテキストの出典**")
+            for s in search_log.get("sources", []):
+                st.write(f"・{s['chapter_number']}章「{s['chapter_title']}」 ＞ {s['section_title']}")
+            st.markdown(f"**コンテキストトークン数:** {search_log.get('total_context_tokens', 0)}")
+            st.markdown("**書き換えクエリ**")
+            for i, q in enumerate(search_log.get("rewritten_queries", []), 1):
+                st.write(f"{i}. {q}")
 
     # AI回答を履歴に追加
     st.session_state.chat_history.append({"role": "assistant", "content": ai_response})
